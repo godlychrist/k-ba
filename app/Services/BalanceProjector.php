@@ -7,7 +7,7 @@ use Illuminate\Support\Collection;
 
 class BalanceProjector
 {
-    public function project(Collection $statements, Collection $adjustments, Collection $transactions, ?Collection $links = null): array
+    public function project(Collection $statements, Collection $adjustments, Collection $transactions, ?Collection $links = null, ?Collection $snapshots = null): array
     {
         $anchors = [];
         $cards = [];
@@ -33,10 +33,16 @@ class BalanceProjector
             $anchors[] = ['account_reference' => $statement->account_reference, 'currency' => $statement->currency, 'amount' => (string) $statement->closing_balance, 'at' => $time, 'source' => 'statement', 'statement_id' => $statement->id];
         }
         $adjustedAccounts = [];
+        foreach ($snapshots ?? collect() as $snapshot) {
+            if (! $snapshot->account_reference) continue;
+            $anchors[] = ['account_reference' => $snapshot->account_reference, 'currency' => $snapshot->currency, 'amount' => (string) $snapshot->amount, 'at' => CarbonImmutable::parse($snapshot->observed_at), 'source' => 'email', 'statement_id' => null];
+        }
         foreach ($adjustments->sortByDesc('id') as $adjustment) {
             $adjustedKey = $adjustment->account_reference.':'.$adjustment->currency;
             if (isset($adjustedAccounts[$adjustedKey])) continue;
             $adjustedAccounts[$adjustedKey] = true;
+            // An explicit balance adjustment supersedes email snapshots for this account.
+            $anchors = array_values(array_filter($anchors, fn ($anchor) => $anchor['source'] !== 'email' || $anchor['account_reference'].':'.$anchor['currency'] !== $adjustedKey));
             $anchors[] = ['account_reference' => $adjustment->account_reference, 'currency' => $adjustment->currency, 'amount' => (string) $adjustment->amount, 'at' => CarbonImmutable::parse($adjustment->effective_at), 'source' => 'manual', 'statement_id' => null];
         }
         usort($anchors, fn ($a, $b) => $b['at']->timestamp <=> $a['at']->timestamp);

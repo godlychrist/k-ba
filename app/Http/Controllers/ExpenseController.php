@@ -155,7 +155,7 @@ class ExpenseController extends Controller
         $statements = BankStatement::whereIn('mail_record_id', $records)->where('status', '!=', 'reference')->orderByRaw('closing_date DESC NULLS LAST')->orderByDesc('id')->get();
         $adjustments = BalanceAdjustment::where('user_id', $request->user()->id)->get();
         $links = DB::table('debit_card_links')->where('user_id', $request->user()->id)->get(['card_reference', 'account_reference', 'currency']);
-        $projections = app(BalanceProjector::class)->project($statements, $adjustments, $transactions, $links);
+        $projections = app(BalanceProjector::class)->project($statements, $adjustments, $transactions, $links, $balances);
 
         return response()->json(['debit_card_links' => $links, 'import_since' => config('expenses.import_since'), 'statements' => $statements, 'projected_balances' => $projections, 'user' => ['id' => $request->user()->id, 'email' => $request->user()->email], 'accounts' => MailAccount::whereIn('id', $ids)->get(['id', 'email', 'provider', 'last_synced_at', 'sync_started_at']), 'transactions' => $transactions, 'balances' => $balances, 'scanned' => DB::table('mail_records')->whereIn('mail_account_id', $ids)->where('received_at', '>=', $since)->count(), 'unrecognized' => DB::table('mail_records')->whereIn('mail_account_id', $ids)->where('received_at', '>=', $since)->where('status', 'unrecognized')->count()])->header('Cache-Control', 'no-store');
     }

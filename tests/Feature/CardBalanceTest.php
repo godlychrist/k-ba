@@ -17,6 +17,35 @@ class CardBalanceTest extends TestCase
         return (object) array_merge(['account_reference' => '9495', 'currency' => 'CRC', 'instrument_type' => 'card', 'date_from_email' => false, 'occurred_at' => '2026-10-04T19:29:00-06:00', 'kind' => 'expense', 'amount' => '20762.00'], $fields);
     }
 
+    public function test_email_balance_applies_only_later_matching_movements(): void
+    {
+        $snapshot = (object) ['account_reference' => '9314', 'currency' => 'CRC', 'amount' => '10000.00', 'observed_at' => '2026-10-01T06:00:00Z'];
+        $movements = collect([
+            $this->purchase(['instrument_type' => 'bank_account', 'account_reference' => '9314', 'amount' => '1200.50']),
+            $this->purchase(['instrument_type' => 'bank_account', 'account_reference' => '9314', 'kind' => 'income', 'amount' => '2000.00']),
+            $this->purchase(['instrument_type' => 'bank_account', 'account_reference' => '9314', 'occurred_at' => '2026-09-30T12:00:00Z']),
+            $this->purchase(['instrument_type' => 'bank_account', 'account_reference' => '9314', 'currency' => 'USD']),
+            $this->purchase(),
+        ]);
+        $projector = new BalanceProjector;
+        $result = $projector->project(collect(), collect(), $movements, collect(), collect([$snapshot]));
+        $this->assertSame('10799.50', $result[0]['amount']);
+        $this->assertSame(2, $result[0]['applied_movements']);
+        $this->assertSame($result, $projector->project(collect(), collect(), $movements, collect(), collect([$snapshot])));
+        $movements[0]->amount = '500.00';
+        $this->assertSame('11500.00', $projector->project(collect(), collect(), $movements, collect(), collect([$snapshot]))[0]['amount']);
+    }
+
+    public function test_explicit_adjustment_supersedes_email_snapshot(): void
+    {
+        $user = User::factory()->create();
+        $base = BalanceAdjustment::create(['user_id' => $user->id, 'account_reference' => '9314', 'currency' => 'CRC', 'amount' => '5000.00', 'effective_at' => '2026-10-01T06:00:00Z']);
+        $snapshot = (object) ['account_reference' => '9314', 'currency' => 'CRC', 'amount' => '999.00', 'observed_at' => '2026-10-03T06:00:00Z'];
+        $result = (new BalanceProjector)->project(collect(), collect([$base]), collect(), collect(), collect([$snapshot]));
+        $this->assertSame('5000.00', $result[0]['amount']);
+        $this->assertSame('manual', $result[0]['source']);
+    }
+
     public function test_linked_card_reduces_manual_balance_without_a_statement(): void
     {
         $user = User::factory()->create();
